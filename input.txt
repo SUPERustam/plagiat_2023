@@ -1,5 +1,4 @@
-a.py b.py
-a.py a.py
+files/auto.py plagiat1/auto.py
 files/main.py plagiat1/main.py
 files/loss.py plagiat2/loss.py
 files/loss.py files/loss.py

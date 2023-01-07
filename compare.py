@@ -1,18 +1,57 @@
 #!/usr/bin/python3
 import numpy as np
+from numpy._typing import NDArray
 
 import ast
 import argparse
-
-from numpy._typing import NDArray
-
-# TODO: tests
+import re
 
 
 class Compare():
     def __init__(self, enter_files: list[list[str]]) -> None:
         self.enter_files: list[list[str]] = enter_files
         self.result: list[str] = []
+
+    def antiplagiat(self, insertion_cost=1, deletion_cost=1,
+                    substitution_cost=1, transposition_cost=1, advanced=False,
+                    pure=False, nice_view=False, round_number=0) -> None:
+        for i in range(0, len(self.enter_files)):
+            result_of_reading: bool = True
+            print(
+                f'{self.enter_files[i][0]} & {self.enter_files[i][1]}:',
+                end=' ')
+            if pure:
+                result_of_reading: bool = self.read(
+                    self.enter_files[i][0], self.enter_files[i][1])
+            else:
+                result_of_reading: bool = self.ast_process_files(
+                    self.enter_files[i][0], self.enter_files[i][1])
+            if not result_of_reading:
+                continue
+            print("success read", end=', ')
+
+            if advanced:
+                answer: np.float64 = self.damerau_levenstain_distance(
+                    insertion_cost=insertion_cost,
+                    deletion_cost=deletion_cost,
+                    substitution_cost=substitution_cost,
+                    transposition_cost=transposition_cost)\
+                    / max(self.length_f1, self.length_f2)
+            else:
+                answer: np.float64 = self.levenstain_distance(
+                    insertion_cost=insertion_cost,
+                    deletion_cost=deletion_cost,
+                    substitution_cost=substitution_cost)\
+                    / max(self.length_f1, self.length_f2)
+
+            if round_number:
+                answer: np.float64 = round(answer, round_number)
+
+            if nice_view:
+                self.result.append(str(100 - answer * 100) + '%')
+            else:
+                self.result.append(str(1.0 - answer))
+            print(f"answer: {self.result[-1]} ✅")
 
     def damerau_levenstain_distance(self, insertion_cost=1, deletion_cost=1,
                                     substitution_cost=1,
@@ -43,13 +82,10 @@ class Compare():
                                                i - 1] + letter_cost)
 
                 # transposition
-                if i > 1 and j > 1 and self.f1[i - 1] == self.f2[j - 2] and self.f1[i - 2] == self.f2[j - 1]:
-                    # print("back", (current_line - 2) % 3, current_line, i, "\n", mat)
+                if i > 1 and j > 1 and self.f1[i - 1] == self.f2[j - 2]\
+                        and self.f1[i - 2] == self.f2[j - 1]:
                     mat[current_line, i] = min(mat[current_line, i], mat[(
                         current_line - 2) % 3, i - 2] + transposition_cost)
-
-        # print(mat, current_line, mat[current_line, -1])
-        # print(mat[current_line, -1], len(self.f1), len(self.f2))
         return mat[current_line, -1]
 
     def levenstain_distance(self, insertion_cost=1, deletion_cost=1,
@@ -77,43 +113,7 @@ class Compare():
                                                i - 1] + insertion_cost,
                                            mat[(current_line - 1) % 2,
                                                i - 1] + letter_cost)
-        # print(mat, current_line, mat[current_line, -1])
         return mat[current_line, -1]
-
-    def antiplagiat(self, insertion_cost=1, deletion_cost=1,
-                    substitution_cost=1, transposition_cost=1, advanced=False,
-                    pure=False, nice_view=False):
-        for i in range(0, len(self.enter_files)):
-            result_of_reading: bool = True
-            print(
-                f'Processing {self.enter_files[i][0]} | {self.enter_files[i][1]}:', end=' ')
-            if pure:
-                result_of_reading: bool = self.read(
-                    self.enter_files[i][0], self.enter_files[i][1])
-            else:
-                result_of_reading: bool = self.ast_process_files(
-                    self.enter_files[i][0], self.enter_files[i][1])
-            if not result_of_reading:
-                continue
-            print("success read", end=', ')
-
-            if advanced:
-                answer: np.float64 = self.damerau_levenstain_distance(
-                    insertion_cost=insertion_cost,
-                    deletion_cost=deletion_cost,
-                    substitution_cost=substitution_cost,
-                    transposition_cost=transposition_cost) / max(self.length_f1, self.length_f2)
-            else:
-                answer: np.float64 = self.levenstain_distance(
-                    insertion_cost=insertion_cost,
-                    deletion_cost=deletion_cost,
-                    substitution_cost=substitution_cost) / max(self.length_f1, self.length_f2)
-
-            if nice_view:
-                self.result.append(str(100 - answer * 100) + '%')
-            else:
-                self.result.append(str(1.0 - answer))
-            print(f"answer: {self.result[-1]} ✅")
 
     def ast_process_files(self, python_file1: str, python_file2: str) -> bool:
         try:
@@ -123,8 +123,32 @@ class Compare():
         except FileNotFoundError:
             print('files not found 😕')
             return False
-        self.f1: str = ast.dump(ast.parse(f1))
-        self.f2: str = ast.dump(ast.parse(f2))
+        # replace any strings to empty
+        f1 = re.sub(r'"[\s\S]*?"', r"''", f1)
+        f1 = re.sub(r"'[\s\S]*?'", r"''", f1)
+        f2 = re.sub(r'"[\s\S]*?"', r"''", f2)
+        f2 = re.sub(r"'[\s\S]*?'", r"''", f2)
+
+        # remove docstrings and long comments
+        f1 = re.sub(r'= """[\s\S]*?"""', r"= ''", f1)
+        f1 = re.sub(r'= """[\s\S]*?"""', r"= ''", f1)
+        f2 = re.sub(r"= '''[\s\S]*?'''", r"= ''", f2)
+        f2 = re.sub(r"= '''[\s\S]*?'''", r"= ''", f2)
+
+        f1 = re.sub(r'"""[\s\S]*?"""', '', f1)
+        f1 = re.sub(r"'''[\s\S]*?'''", '', f1)
+        f2 = re.sub(r'"""[\s\S]*?"""', '', f2)
+        f2 = re.sub(r"'''[\s\S]*?'''", '', f2)
+
+        try:
+            self.f1: str = ast.dump(ast.parse(f1))
+            self.f2: str = ast.dump(ast.parse(f2))
+        except SyntaxError:
+            print(
+                'bad syntax in files(you can use - p flag'
+                ' to read files without special pre-processing) 💔')
+            return False
+
         self.length_f1: int = len(self.f1)
         self.length_f2: int = len(self.f2)
         return True
@@ -149,28 +173,48 @@ class Compare():
 
 def main() -> None:
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
-        prog="AntiPlagiat", description="Send me two txt files: first with list of filepaths to check for plagiat and second to save result of my work")
+        prog="AntiPlagiat", description="Send me two txt files: first'\
+        ' with list of filepaths to check for plagiat an'\
+        ' second to save result of my work",
+        epilog="You can also combine flags e.g. '-na' equal to '-n -a'")
     parser.add_argument('file1', type=str,
-                        help="txt file of filepaths with this format: \"file plagiat_file\" etc.")
+                        help="txt file of filepaths with this format:"
+                        "\"file plagiat_file\" etc.")
     parser.add_argument('file2', type=str,
-                        help="txt file for results. Previous data will be removed ❌")
-    parser.add_argument('-p', '--pure', action='store_true',)
-    parser.add_argument('-a', '--advanced', action='store_true')
-    parser.add_argument('-n', '--nice-view', action='store_true')
+                        help="txt file for results."
+                        " Previous data will be removed ❌")
+
+    parser.add_argument('-p', '--pure', action='store_true',
+                        help="Don't pre-process files. Without -p flag I will"
+                        " use my cool ast-base pre-process technologies")
+    parser.add_argument('-a', '--advanced', action='store_true',
+                        help="Use Damerau–Levenshtein distance"
+                        " instead of Levenshtein distance")
+
+    parser.add_argument('-n', '--nice-view', action='store_true',
+                        help="Show result in persents instead of fractions")
+    parser.add_argument('-r', '--round-number', action='store', metavar='',
+                        type=int, default=0, help="Round result")
+
     parser.add_argument('-i', '--insertion',
                         action='store', type=float,
-                        metavar='', default=1.0)
+                        metavar='', default=1.0,
+                        help="Edit insertion cost. Default 1.0")
     parser.add_argument('-d', '--deletion',
                         action='store', type=float,
-                        metavar='', default=1.0)
+                        metavar='', default=1.0,
+                        help="Edit deletion cost. Default 1.0")
     parser.add_argument('-s', '--substitution',
                         action='store', type=float,
-                        metavar='', default=1.0)
-    parser.add_argument('-t', '--transposition',
+                        metavar='', default=1.0,
+                        help="Edit substitution cost. Default 1.0")
+    parser.add_argument('-t', '--trans',
                         action='store', type=float,
-                        metavar='', default=1.0)
+                        metavar='', default=1.0,
+                        help="Edit transposition cost."
+                        " Default 1.0. Only for -a flag")
+
     args: argparse.Namespace = parser.parse_args()
-    # print(args)
 
     try:
         with open(args.file1, 'r') as enter:
@@ -183,10 +227,11 @@ def main() -> None:
         compare_session.antiplagiat(insertion_cost=args.insertion,
                                     deletion_cost=args.deletion,
                                     substitution_cost=args.substitution,
-                                    transposition_cost=args.transposition,
+                                    transposition_cost=args.trans,
                                     advanced=args.advanced,
                                     pure=args.pure,
-                                    nice_view=args.nice_view)
+                                    nice_view=args.nice_view,
+                                    round_number=args.round_number)
         compare_session.write(args.file2)
 
 
